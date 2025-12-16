@@ -1,0 +1,21 @@
+# Whisper Tool Configuration
+
+[audio]
+# Sample rate in Hz (Whisper expects 16000)
+sample_rate = 16000
+# Audio device name (comment out for default)
+# device = "pulse"
+
+[whisper]
+# Model size: tiny, base, small, medium, large
+model = "base"
+# Path to models directory (default: ~/.local/share/whisper-tool/models)
+# models_dir = "/path/to/models"
+# Language (comment out for auto-detect)
+# language = "fr"
+
+[ollama]
+# Ollama API URL
+url = "http://localhost:11434"
+# Model to use for text enhancement
+model = "llama3.2"

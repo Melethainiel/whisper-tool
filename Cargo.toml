@@ -1,0 +1,60 @@
+[package]
+name = "whisper-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Voice dictation tool with STT (Whisper) and LLM enhancement (Ollama)"
+license = "MIT"
+authors = ["Thibaud"]
+
+[[bin]]
+name = "whisper-tool"
+path = "src/main.rs"
+
+[[bin]]
+name = "whisper-tool-gui"
+path = "src/gui.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Audio capture
+cpal = "0.15"
+
+# Whisper STT
+whisper-rs = "0.13"
+
+# HTTP client for Ollama
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+
+# Clipboard
+arboard = "3"
+
+# Configuration
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Paths
+dirs = "6"
+
+# Signal handling
+ctrlc = "3"
+
+# GUI
+gtk4 = "0.9"
+ksni = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
