@@ -19,6 +19,8 @@ pub struct Config {
     pub prompts: PromptsConfig,
     #[serde(default)]
     pub shortcuts: ShortcutsConfig,
+    #[serde(default)]
+    pub quick_dictate: QuickDictateConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,13 @@ pub struct UiConfig {
     /// Auto-copy result to clipboard
     #[serde(default = "default_true")]
     pub auto_copy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuickDictateConfig {
+    /// Mode to use for quick dictate (None = use current UI mode)
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,6 +244,9 @@ fn default_shortcuts() -> HashMap<String, String> {
     shortcuts.insert("toggle_recording".to_string(), "<Control>r".to_string());
     shortcuts.insert("cancel_recording".to_string(), "Escape".to_string());
     
+    // Quick dictate (floating window)
+    shortcuts.insert("quick_dictate".to_string(), "<Control><Shift>d".to_string());
+    
     // Copy actions
     shortcuts.insert("copy_transcript".to_string(), "<Control><Shift>c".to_string());
     shortcuts.insert("copy_enhanced".to_string(), "<Control><Shift>e".to_string());
@@ -255,6 +267,7 @@ impl Default for Config {
             ui: UiConfig::default(),
             prompts: PromptsConfig::default(),
             shortcuts: ShortcutsConfig::default(),
+            quick_dictate: QuickDictateConfig::default(),
         }
     }
 }
@@ -312,6 +325,14 @@ impl Default for ShortcutsConfig {
     fn default() -> Self {
         Self {
             bindings: default_shortcuts(),
+        }
+    }
+}
+
+impl Default for QuickDictateConfig {
+    fn default() -> Self {
+        Self {
+            mode: None, // Use current UI mode by default
         }
     }
 }

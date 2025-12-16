@@ -3109,6 +3109,7 @@ dependencies = [
  "dirs",
  "gtk4",
  "ksni",
+ "libc",
  "reqwest",
  "serde",
  "tokio",

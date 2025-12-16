@@ -1,6 +1,7 @@
 mod audio;
 mod config;
 mod enhance;
+mod floating;
 mod notifier;
 mod output;
 mod transcribe;
@@ -45,12 +46,17 @@ static WINDOW_VISIBLE: Mutex<Option<Arc<Mutex<bool>>>> = Mutex::new(None);
 static NOTIFIER: Mutex<Option<Notifier>> = Mutex::new(None);
 static RECORDING_STATE: Mutex<Option<Arc<Mutex<TrayState>>>> = Mutex::new(None);
 
+// Global state for floating window (to handle SIGUSR1 toggle)
+static FLOATING_ACTIVE: AtomicBool = AtomicBool::new(false);
+static FLOATING_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Default)]
 struct TrayState {
     recording: bool,
     processing: bool,
     start_requested: bool,
     stop_requested: bool,
+    floating_requested: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1166,6 +1172,16 @@ fn start_tray_icon() {
                     }
                     .into(),
                 );
+                items.push(
+                    StandardItem {
+                        label: "🎯 Quick Dictate".to_string(),
+                        activate: Box::new(|_| {
+                            request_floating_dictation();
+                        }),
+                        ..Default::default()
+                    }
+                    .into(),
+                );
             } else if self.recording {
                 items.push(
                     StandardItem {
@@ -1221,6 +1237,16 @@ fn start_tray_icon() {
             if let Some(state_ref) = guard.as_ref() {
                 if let Ok(mut state) = state_ref.lock() {
                     state.stop_requested = true;
+                }
+            }
+        }
+    }
+
+    fn request_floating_dictation() {
+        if let Ok(guard) = RECORDING_STATE.lock() {
+            if let Some(state_ref) = guard.as_ref() {
+                if let Ok(mut state) = state_ref.lock() {
+                    state.floating_requested = true;
                 }
             }
         }
@@ -1978,6 +2004,7 @@ fn build_ui(app: &Application, tray_state: Arc<Mutex<TrayState>>, visible: Arc<M
     let status_label_update = status_label.clone();
     let record_button_update = record_button.clone();
     let tray_state_update = Arc::clone(&tray_state);
+    let window_for_floating = window.clone();
 
     glib::timeout_add_local(Duration::from_millis(50), move || {
         let state = state_for_timer.borrow();
@@ -1996,6 +2023,25 @@ fn build_ui(app: &Application, tray_state: Arc<Mutex<TrayState>>, visible: Arc<M
                 drop(tray);
                 drop(state);
                 record_button_update.emit_clicked();
+                return glib::ControlFlow::Continue;
+            }
+            if tray.floating_requested && state.app_state == AppState::Idle {
+                tray.floating_requested = false;
+                let config = state.config.clone();
+                // Use quick_dictate.mode if configured, otherwise use current UI mode
+                let mode = config.quick_dictate.mode.clone()
+                    .unwrap_or_else(|| state.selected_mode.clone());
+                let whisper_engine = Arc::clone(&state.whisper_engine);
+                drop(tray);
+                drop(state);
+                floating::launch_floating_window(
+                    &window_for_floating,
+                    config,
+                    mode,
+                    whisper_engine,
+                    &FLOATING_ACTIVE,
+                    &FLOATING_STOP_REQUESTED,
+                );
                 return glib::ControlFlow::Continue;
             }
         }
@@ -2025,6 +2071,7 @@ fn build_ui(app: &Application, tray_state: Arc<Mutex<TrayState>>, visible: Arc<M
     let enhanced_buffer_for_keys = enhanced_buffer.clone();
     let visible_for_keys = Arc::clone(&visible);
     let settings_button_for_keys = settings_button.clone();
+    let window_for_keys = window.clone();
 
     key_controller.connect_key_pressed(move |_, keyval, _keycode, modifier| {
         // Clone shortcuts to avoid borrow issues
@@ -2095,6 +2142,25 @@ fn build_ui(app: &Application, tray_state: Arc<Mutex<TrayState>>, visible: Arc<M
                         settings_button_for_keys.emit_clicked();
                         return gtk4::glib::Propagation::Stop;
                     }
+                    "quick_dictate" => {
+                        let state = state_for_keys.borrow();
+                        if state.app_state == AppState::Idle {
+                            let config = state.config.clone();
+                            let mode = config.quick_dictate.mode.clone()
+                                .unwrap_or_else(|| state.selected_mode.clone());
+                            let whisper_engine = Arc::clone(&state.whisper_engine);
+                            drop(state);
+                            floating::launch_floating_window(
+                                &window_for_keys,
+                                config,
+                                mode,
+                                whisper_engine,
+                                &FLOATING_ACTIVE,
+                                &FLOATING_STOP_REQUESTED,
+                            );
+                        }
+                        return gtk4::glib::Propagation::Stop;
+                    }
                     _ => {}
                 }
                 break;
@@ -2132,6 +2198,21 @@ fn main() -> glib::ExitCode {
     // Start tray icon thread AFTER globals are initialized
     std::thread::spawn(|| {
         start_tray_icon();
+    });
+
+    // Setup SIGUSR1 handler for global quick dictate shortcut (toggle)
+    // Usage: pkill -SIGUSR1 -f whisper-tool-gui (or bind in Hyprland config)
+    glib::unix_signal_add_local(libc::SIGUSR1, move || {
+        if FLOATING_ACTIVE.load(Ordering::SeqCst) {
+            // Floating window is active -> request stop
+            FLOATING_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        } else {
+            // No floating window -> request start
+            if let Ok(mut state) = tray_state.lock() {
+                state.floating_requested = true;
+            }
+        }
+        glib::ControlFlow::Continue
     });
 
     app.run()
