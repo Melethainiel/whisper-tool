@@ -10,8 +10,19 @@ permissions:
 
 jobs:
   build:
-    name: Build and Release
+    name: Build ${{ matrix.gpu }} variant
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # CPU-only build (smallest, most compatible)
+          - gpu: cpu
+            features: ""
+            suffix: ""
+          # Vulkan build (cross-vendor GPU: NVIDIA, AMD, Intel)
+          - gpu: vulkan
+            features: "--features vulkan"
+            suffix: "-vulkan"
     
     steps:
       - name: Checkout code
@@ -20,7 +31,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libpulse-dev libasound2-dev libdbus-1-dev libclang-dev build-essential
+          sudo apt-get install -y \
+            libgtk-4-dev \
+            libpulse-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            libclang-dev \
+            build-essential \
+            cmake
+          # Install Vulkan SDK for vulkan builds
+          if [ "${{ matrix.gpu }}" = "vulkan" ]; then
+            sudo apt-get install -y libvulkan-dev
+          fi
       
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
@@ -29,21 +51,93 @@ jobs:
           override: true
       
       - name: Build release binary
-        run: cargo build --release --verbose
+        run: cargo build --release --verbose ${{ matrix.features }}
       
       - name: Prepare release assets
         run: |
           mkdir -p release
-          cp target/release/whisper-tool-gui release/whisper-tool-gui-linux-x86_64
-          chmod +x release/whisper-tool-gui-linux-x86_64
-          # Create placeholder icon if not exists
+          cp target/release/whisper-tool-gui "release/whisper-tool-gui-linux-x86_64${{ matrix.suffix }}"
+          chmod +x "release/whisper-tool-gui-linux-x86_64${{ matrix.suffix }}"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.gpu }}
+          path: release/whisper-tool-gui-linux-x86_64${{ matrix.suffix }}
+
+  # Optional: CUDA build (requires special runner or container)
+  build-cuda:
+    name: Build CUDA variant
+    runs-on: ubuntu-latest
+    container:
+      image: nvidia/cuda:12.2.0-devel-ubuntu22.04
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            libgtk-4-dev \
+            libpulse-dev \
+            libasound2-dev \
+            libdbus-1-dev \
+            libclang-dev \
+            build-essential \
+            cmake \
+            curl \
+            pkg-config
+      
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Build release binary
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --release --verbose --features cuda
+      
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp target/release/whisper-tool-gui "release/whisper-tool-gui-linux-x86_64-cuda"
+          chmod +x "release/whisper-tool-gui-linux-x86_64-cuda"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-cuda
+          path: release/whisper-tool-gui-linux-x86_64-cuda
+
+  release:
+    name: Create Release
+    needs: [build, build-cuda]
+    runs-on: ubuntu-latest
+    # Continue even if CUDA build fails (it's optional)
+    if: always() && needs.build.result == 'success'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Prepare release directory
+        run: |
+          mkdir -p release
+          # Copy all binaries from artifacts
+          find artifacts -type f -name "whisper-tool-gui-*" -exec cp {} release/ \;
+          # Copy icon
           if [ -f icon.png ]; then
             cp icon.png release/whisper-tool.png
-          else
-            # Create a simple placeholder icon
-            convert -size 128x128 xc:'#88c0d0' -fill '#2e3440' -gravity center -pointsize 48 -annotate 0 '🎤' release/whisper-tool.png 2>/dev/null || \
-            echo "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAACXBIWXMAAAsTAAALEwEAmpwYAAAF0WlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNi4wLWMwMDIgNzkuMTY0NDYwLCAyMDIwLzA1LzEyLTE2OjA0OjE3ICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIiB4bWxuczpzdEV2dD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL1Jlc291cmNlRXZlbnQjIiB4bWxuczpkYz0iaHR0cDovL3B1cmwub3JnL2RjL2VsZW1lbnRzLzEuMS8iIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgMjEuMiAoV2luZG93cykiIHhtcDpDcmVhdGVEYXRlPSIyMDI0LTAxLTE1VDEyOjAwOjAwKzAxOjAwIiB4bXA6TWV0YWRhdGFEYXRlPSIyMDI0LTAxLTE1VDEyOjAwOjAwKzAxOjAwIiB4bXA6TW9kaWZ5RGF0ZT0iMjAyNC0wMS0xNVQxMjowMDowMCswMTowMCIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDoxMjM0NTY3OC0xMjM0LTEyMzQtMTIzNC0xMjM0NTY3ODkwYWIiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6MTIzNDU2NzgtMTIzNC0xMjM0LTEyMzQtMTIzNDU2Nzg5MGFiIiB4bXBNTTpPcmlnaW5hbERvY3VtZW50SUQ9InhtcC5kaWQ6MTIzNDU2NzgtMTIzNC0xMjM0LTEyMzQtMTIzNDU2Nzg5MGFiIiBkYzpmb3JtYXQ9ImltYWdlL3BuZyIgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyI+IDx4bXBNTTpIaXN0b3J5PiA8cmRmOlNlcT4gPHJkZjpsaSBzdEV2dDphY3Rpb249ImNyZWF0ZWQiIHN0RXZ0Omluc3RhbmNlSUQ9InhtcC5paWQ6MTIzNDU2NzgtMTIzNC0xMjM0LTEyMzQtMTIzNDU2Nzg5MGFiIiBzdEV2dDp3aGVuPSIyMDI0LTAxLTE1VDEyOjAwOjAwKzAxOjAwIiBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZG9iZSBQaG90b3Nob3AgMjEuMiAoV2luZG93cykiLz4gPC9yZGY6U2VxPiA8L3htcE1NOkhpc3Rvcnk+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+AAAAB3RJTUUH6AEPCwAeIdQhLwAAAKVJREFUeNrtzjENACAQAMC7/ksEHYAFBoKNxSZ7d/Pt/gI4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAnAA4AJwAOACcADgAHIALdxMBJrP9+VYAAAAASUVORK5CYII=" | base64 -d > release/whisper-tool.png
           fi
+          ls -la release/
       
       - name: Create Release
         id: create_release
@@ -62,11 +156,28 @@ jobs:
             curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/master/install.sh | bash
             ```
             
-            Or download manually and run:
+            The installer auto-detects your GPU and downloads the appropriate binary.
+            
+            ### Manual GPU Selection
+            
             ```bash
-            chmod +x whisper-tool-gui-linux-x86_64
-            sudo mv whisper-tool-gui-linux-x86_64 /usr/local/bin/whisper-tool-gui
+            # For NVIDIA with CUDA (best performance)
+            GPU_BACKEND=cuda curl -sSL ... | bash
+            
+            # For Vulkan (NVIDIA, AMD, Intel)
+            GPU_BACKEND=vulkan curl -sSL ... | bash
+            
+            # For CPU only
+            GPU_BACKEND=cpu curl -sSL ... | bash
             ```
+            
+            ## Binary Variants
+            
+            | Binary | GPU Support | Best For |
+            |--------|-------------|----------|
+            | `whisper-tool-gui-linux-x86_64` | CPU only | Maximum compatibility |
+            | `whisper-tool-gui-linux-x86_64-vulkan` | Vulkan | AMD, Intel, NVIDIA (cross-vendor) |
+            | `whisper-tool-gui-linux-x86_64-cuda` | CUDA | NVIDIA GPUs (best performance) |
             
             ## Requirements
             
@@ -74,6 +185,9 @@ jobs:
             - wtype (for auto-paste on Wayland)
             - Whisper model (downloaded automatically on first run)
             - Ollama or other LLM provider (optional, for text enhancement)
+            - GPU drivers (for GPU variants):
+              - CUDA: NVIDIA drivers + CUDA runtime
+              - Vulkan: Vulkan-compatible GPU drivers
             
             ## Quick Dictate Global Shortcut (Hyprland)
             
@@ -83,7 +197,7 @@ jobs:
             exec-once = whisper-tool-gui
             ```
       
-      - name: Upload Binary
+      - name: Upload CPU Binary
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -91,6 +205,27 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./release/whisper-tool-gui-linux-x86_64
           asset_name: whisper-tool-gui-linux-x86_64
+          asset_content_type: application/octet-stream
+      
+      - name: Upload Vulkan Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/whisper-tool-gui-linux-x86_64-vulkan
+          asset_name: whisper-tool-gui-linux-x86_64-vulkan
+          asset_content_type: application/octet-stream
+      
+      - name: Upload CUDA Binary
+        if: needs.build-cuda.result == 'success'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./release/whisper-tool-gui-linux-x86_64-cuda
+          asset_name: whisper-tool-gui-linux-x86_64-cuda
           asset_content_type: application/octet-stream
       
       - name: Upload Icon

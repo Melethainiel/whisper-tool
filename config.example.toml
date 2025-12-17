@@ -13,9 +13,20 @@ model = "base"
 # models_dir = "/path/to/models"
 # Language (comment out for auto-detect)
 # language = "fr"
+# GPU backend: auto, cpu, vulkan, cuda
+# - auto: automatically use best available (cuda > vulkan > cpu)
+# - cpu: force CPU-only inference
+# - vulkan: use Vulkan GPU acceleration (works on NVIDIA, AMD, Intel)
+# - cuda: use CUDA acceleration (NVIDIA only, best performance)
+# Note: GPU support requires the binary to be compiled with the appropriate feature
+gpu = "auto"
 
-[ollama]
-# Ollama API URL
+[llm]
+# LLM provider: ollama, openai, anthropic, openrouter
+provider = "ollama"
+# API URL (provider-specific)
 url = "http://localhost:11434"
 # Model to use for text enhancement
 model = "llama3.2"
+# API key (required for cloud providers like OpenAI, Anthropic, OpenRouter)
+# api_key = "your-api-key"

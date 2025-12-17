@@ -24,8 +24,8 @@ tokio = { version = "1", features = ["full"] }
 # Audio capture
 cpal = "0.15"
 
-# Whisper STT
-whisper-rs = "0.13"
+# Whisper STT (with optional GPU acceleration)
+whisper-rs = { version = "0.13", features = [] }
 
 # HTTP client for Ollama
 reqwest = { version = "0.12", features = ["json", "blocking"] }
@@ -54,6 +54,13 @@ ctrlc = "3"
 gtk4 = "0.9"
 ksni = "0.2"
 libc = "0.2"
+
+[features]
+default = []
+# GPU acceleration backends (choose one based on your hardware)
+vulkan = ["whisper-rs/vulkan"]  # Cross-vendor GPU (NVIDIA, AMD, Intel)
+cuda = ["whisper-rs/cuda"]      # NVIDIA GPUs (best performance)
+# hipblas = ["whisper-rs/hipblas"]  # AMD GPUs (Linux only) - uncomment if needed
 
 [profile.release]
 lto = true

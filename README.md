@@ -6,6 +6,7 @@ Voice dictation tool for Linux with Speech-to-Text (Whisper) and LLM enhancement
 
 - **Voice Recording**: Capture audio from microphone
 - **Speech-to-Text**: Local transcription using Whisper
+- **GPU Acceleration**: Optional Vulkan or CUDA support for faster transcription
 - **LLM Enhancement**: Improve text with Ollama (optional)
 - **Clipboard Integration**: Auto-copy results
 - **GUI Interface**: GTK4 interface with system tray icon
@@ -40,12 +41,63 @@ ollama pull llama3.2
 ### Build
 
 ```bash
+# CPU-only build (most compatible)
 cargo build --release
+
+# With Vulkan GPU support (NVIDIA, AMD, Intel)
+cargo build --release --features vulkan
+
+# With CUDA GPU support (NVIDIA only, best performance)
+cargo build --release --features cuda
 ```
 
 Binaries:
 - `target/release/whisper-tool` - CLI interface
 - `target/release/whisper-tool-gui` - GTK4 GUI with tray icon
+
+## GPU Acceleration
+
+Whisper-tool supports GPU acceleration for faster transcription:
+
+| Backend | GPU Support | Performance | Build Flag |
+|---------|-------------|-------------|------------|
+| CPU | Any | Baseline | (default) |
+| Vulkan | NVIDIA, AMD, Intel | ~2-3x faster | `--features vulkan` |
+| CUDA | NVIDIA only | ~3-5x faster | `--features cuda` |
+
+### GPU Requirements
+
+**Vulkan** (recommended for most users):
+```bash
+# Arch Linux
+sudo pacman -S vulkan-icd-loader
+# + GPU-specific driver:
+# NVIDIA: nvidia-utils (included with nvidia driver)
+# AMD: vulkan-radeon or amdvlk
+# Intel: vulkan-intel
+
+# Ubuntu/Debian
+sudo apt install libvulkan1
+# + GPU-specific driver
+```
+
+**CUDA** (NVIDIA only, best performance):
+```bash
+# Requires NVIDIA drivers and CUDA toolkit
+# Arch: sudo pacman -S cuda
+# Ubuntu: sudo apt install nvidia-cuda-toolkit
+```
+
+### Runtime Configuration
+
+Set GPU backend in `~/.config/whisper-tool/config.toml`:
+
+```toml
+[whisper]
+model = "base"
+# GPU backend: auto, cpu, vulkan, cuda
+gpu = "auto"  # auto-detect best available
+```
 
 ## Usage
 
@@ -106,10 +158,14 @@ sample_rate = 16000
 [whisper]
 model = "base"
 # language = "fr"
+# GPU backend: auto, cpu, vulkan, cuda
+gpu = "auto"
 
-[ollama]
+[llm]
+provider = "ollama"
 url = "http://localhost:11434"
 model = "llama3.2"
+# api_key = "your-key"  # for cloud providers
 ```
 
 ## Screenshots

@@ -5,7 +5,7 @@ use tracing::{debug, info};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::audio::AudioData;
-use crate::config::{get_model_path, Config};
+use crate::config::{get_model_path, Config, GpuBackend};
 
 /// Model download URLs (Hugging Face)
 const MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
@@ -18,6 +18,47 @@ const VALID_MODELS: [&str; 5] = ["tiny", "base", "small", "medium", "large"];
 pub struct WhisperEngine {
     ctx: WhisperContext,
     model_name: String,
+    gpu_backend: GpuBackend,
+}
+
+/// Create WhisperContextParameters with GPU configuration
+fn create_context_params(config: &Config) -> WhisperContextParameters<'_> {
+    let mut params = WhisperContextParameters::default();
+    let backend = config.whisper.gpu.resolve();
+    
+    // Enable GPU if the resolved backend uses it
+    if backend.uses_gpu() {
+        params.use_gpu(true);
+        debug!("GPU acceleration enabled (backend: {:?})", backend);
+    } else {
+        params.use_gpu(false);
+        debug!("Using CPU inference");
+    }
+    
+    params
+}
+
+/// Get a description of the active GPU backend for logging
+fn describe_gpu_backend(config: &Config) -> String {
+    let backend = config.whisper.gpu.resolve();
+    match backend {
+        GpuBackend::Auto => "auto (resolved to CPU)".to_string(),
+        GpuBackend::Cpu => "CPU".to_string(),
+        GpuBackend::Vulkan => {
+            if cfg!(feature = "vulkan") {
+                "Vulkan GPU".to_string()
+            } else {
+                "Vulkan (not compiled, using CPU)".to_string()
+            }
+        }
+        GpuBackend::Cuda => {
+            if cfg!(feature = "cuda") {
+                "CUDA GPU".to_string()
+            } else {
+                "CUDA (not compiled, using CPU)".to_string()
+            }
+        }
+    }
 }
 
 #[allow(dead_code)] // Used by GUI binary
@@ -30,25 +71,42 @@ impl WhisperEngine {
         ensure_model_exists(model_name, config)?;
         
         let model_path = get_model_path(config, model_name);
-        info!("Loading Whisper model '{}' into memory...", model_name);
+        let gpu_backend = config.whisper.gpu.resolve();
+        let gpu_desc = describe_gpu_backend(config);
         
+        info!(
+            "Loading Whisper model '{}' into memory (backend: {})...",
+            model_name, gpu_desc
+        );
+        
+        let ctx_params = create_context_params(config);
         let ctx = WhisperContext::new_with_params(
             model_path.to_str().unwrap(),
-            WhisperContextParameters::default(),
+            ctx_params,
         )
         .context("Failed to load Whisper model")?;
         
-        info!("Whisper model '{}' loaded and cached", model_name);
+        info!(
+            "Whisper model '{}' loaded and cached (backend: {})",
+            model_name, gpu_desc
+        );
         
         Ok(Self {
             ctx,
             model_name: model_name.clone(),
+            gpu_backend,
         })
     }
     
     /// Get the name of the loaded model
     pub fn model_name(&self) -> &str {
         &self.model_name
+    }
+    
+    /// Get the GPU backend being used
+    #[allow(dead_code)] // Used by GUI binary
+    pub fn gpu_backend(&self) -> &GpuBackend {
+        &self.gpu_backend
     }
     
     /// Transcribe audio using the cached model
@@ -127,11 +185,16 @@ pub fn transcribe(audio: &AudioData, config: &Config) -> Result<String> {
     ensure_model_exists(&config.whisper.model, config)?;
 
     let model_path = get_model_path(config, &config.whisper.model);
-    debug!("Loading Whisper model from {:?}", model_path);
+    let gpu_desc = describe_gpu_backend(config);
+    debug!(
+        "Loading Whisper model from {:?} (backend: {})",
+        model_path, gpu_desc
+    );
 
+    let ctx_params = create_context_params(config);
     let ctx = WhisperContext::new_with_params(
         model_path.to_str().unwrap(),
-        WhisperContextParameters::default(),
+        ctx_params,
     )
     .context("Failed to load Whisper model")?;
 

@@ -65,6 +65,9 @@ pub struct WhisperConfig {
     pub models_dir: PathBuf,
     /// Language (None = auto-detect)
     pub language: Option<String>,
+    /// GPU backend: auto, cpu, vulkan, cuda (requires feature flag)
+    #[serde(default = "default_gpu_backend")]
+    pub gpu: GpuBackend,
 }
 
 /// LLM provider types
@@ -128,6 +131,80 @@ impl LlmProvider {
     }
 }
 
+/// GPU backend for Whisper inference
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum GpuBackend {
+    /// Automatically detect available GPU backend
+    #[default]
+    Auto,
+    /// Force CPU-only inference
+    Cpu,
+    /// Use Vulkan (cross-vendor: NVIDIA, AMD, Intel)
+    Vulkan,
+    /// Use CUDA (NVIDIA only, best performance)
+    Cuda,
+}
+
+impl GpuBackend {
+    /// Get display name for UI
+    #[allow(dead_code)] // Used by GUI binary
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            GpuBackend::Auto => "Auto-detect",
+            GpuBackend::Cpu => "CPU only",
+            GpuBackend::Vulkan => "Vulkan (cross-vendor)",
+            GpuBackend::Cuda => "CUDA (NVIDIA)",
+        }
+    }
+
+    /// Check if this backend is available based on compiled features
+    #[allow(dead_code)] // May be used by GUI for UI filtering
+    pub fn is_available(&self) -> bool {
+        match self {
+            GpuBackend::Auto | GpuBackend::Cpu => true,
+            GpuBackend::Vulkan => cfg!(feature = "vulkan"),
+            GpuBackend::Cuda => cfg!(feature = "cuda"),
+        }
+    }
+
+    /// Get the effective backend to use (resolves Auto)
+    pub fn resolve(&self) -> GpuBackend {
+        match self {
+            GpuBackend::Auto => {
+                // Priority: CUDA > Vulkan > CPU
+                if cfg!(feature = "cuda") {
+                    GpuBackend::Cuda
+                } else if cfg!(feature = "vulkan") {
+                    GpuBackend::Vulkan
+                } else {
+                    GpuBackend::Cpu
+                }
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Check if GPU acceleration is enabled
+    pub fn uses_gpu(&self) -> bool {
+        match self.resolve() {
+            GpuBackend::Cpu | GpuBackend::Auto => false,
+            GpuBackend::Vulkan | GpuBackend::Cuda => true,
+        }
+    }
+
+    /// List of all backends for UI iteration
+    #[allow(dead_code)] // Used by GUI binary
+    pub fn all() -> &'static [GpuBackend] {
+        &[
+            GpuBackend::Auto,
+            GpuBackend::Cpu,
+            GpuBackend::Vulkan,
+            GpuBackend::Cuda,
+        ]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     /// LLM provider (ollama, openai, anthropic, openrouter)
@@ -182,6 +259,10 @@ fn default_models_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("whisper-tool")
         .join("models")
+}
+
+fn default_gpu_backend() -> GpuBackend {
+    GpuBackend::Auto
 }
 
 fn default_llm_url() -> String {
@@ -287,6 +368,7 @@ impl Default for WhisperConfig {
             model: default_model(),
             models_dir: default_models_dir(),
             language: None,
+            gpu: default_gpu_backend(),
         }
     }
 }
