@@ -68,6 +68,9 @@ pub struct WhisperConfig {
     /// GPU backend: auto, cpu, vulkan, cuda (requires feature flag)
     #[serde(default = "default_gpu_backend")]
     pub gpu: GpuBackend,
+    /// Custom words for vocabulary hints (names, technical terms)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_words: Vec<String>,
 }
 
 /// LLM provider types
@@ -369,6 +372,7 @@ impl Default for WhisperConfig {
             models_dir: default_models_dir(),
             language: None,
             gpu: default_gpu_backend(),
+            custom_words: Vec::new(),
         }
     }
 }

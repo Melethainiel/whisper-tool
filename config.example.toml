@@ -20,6 +20,9 @@ model = "base"
 # - cuda: use CUDA acceleration (NVIDIA only, best performance)
 # Note: GPU support requires the binary to be compiled with the appropriate feature
 gpu = "auto"
+# Custom words for vocabulary hints (improves recognition of specific words)
+# Use this to help Whisper recognize names, technical terms, or domain-specific vocabulary
+# custom_words = ["Thibaud", "Claude", "Anthropic", "whisper-tool"]
 
 [llm]
 # LLM provider: ollama, openai, anthropic, openrouter

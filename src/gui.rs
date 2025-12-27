@@ -11,7 +11,7 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Button, CheckButton, ComboBoxText, Dialog, DrawingArea,
-    Entry, Label, Orientation, ResponseType, Scale, ScrolledWindow, TextView,
+    Entry, Label, ListBox, Orientation, ResponseType, Scale, ScrolledWindow, TextView,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -342,6 +342,120 @@ fn show_settings_dialog(parent: &ApplicationWindow, state: &Rc<RefCell<RecorderS
     model_box.append(&model_combo);
     vbox.append(&model_box);
 
+    // Custom Words (vocabulary hints)
+    let words_label = Label::new(Some("Custom Words:"));
+    words_label.set_halign(gtk4::Align::Start);
+    words_label.set_margin_top(8);
+    words_label.set_tooltip_text(Some(
+        "Add words to improve recognition (names, technical terms, etc.)"
+    ));
+    vbox.append(&words_label);
+
+    // ListBox for custom words
+    let words_list = ListBox::new();
+    words_list.set_selection_mode(gtk4::SelectionMode::None);
+    words_list.add_css_class("boxed-list");
+    
+    let words_scrolled = ScrolledWindow::new();
+    words_scrolled.set_child(Some(&words_list));
+    words_scrolled.set_min_content_height(80);
+    words_scrolled.set_max_content_height(120);
+    words_scrolled.set_vexpand(false);
+    
+    // Wrap in Rc<RefCell> so we can share the words list across closures
+    let custom_words: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(
+        state_borrow.config.whisper.custom_words.clone()
+    ));
+    
+    // Helper to create a row for a word
+    fn create_word_row(word: &str, words_list: &ListBox, custom_words: &Rc<RefCell<Vec<String>>>) {
+        let row = gtk4::Box::new(Orientation::Horizontal, 8);
+        row.set_margin_top(4);
+        row.set_margin_bottom(4);
+        row.set_margin_start(8);
+        row.set_margin_end(8);
+        
+        let label = Label::new(Some(word));
+        label.set_hexpand(true);
+        label.set_halign(gtk4::Align::Start);
+        row.append(&label);
+        
+        let remove_btn = Button::with_label("−");
+        remove_btn.add_css_class("flat");
+        remove_btn.add_css_class("circular");
+        remove_btn.set_tooltip_text(Some("Remove word"));
+        
+        let words_list_clone = words_list.clone();
+        let custom_words_clone = Rc::clone(custom_words);
+        let word_to_remove = word.to_string();
+        remove_btn.connect_clicked(move |_| {
+            // Find and remove the row
+            let mut index = 0;
+            while let Some(child) = words_list_clone.row_at_index(index) {
+                if let Some(box_widget) = child.child() {
+                    if let Some(first_child) = box_widget.first_child() {
+                        if let Some(lbl) = first_child.downcast_ref::<Label>() {
+                            if lbl.text() == word_to_remove {
+                                words_list_clone.remove(&child);
+                                custom_words_clone.borrow_mut().retain(|w| w != &word_to_remove);
+                                return;
+                            }
+                        }
+                    }
+                }
+                index += 1;
+            }
+        });
+        row.append(&remove_btn);
+        
+        words_list.append(&row);
+    }
+    
+    // Populate initial words
+    for word in custom_words.borrow().iter() {
+        create_word_row(word, &words_list, &custom_words);
+    }
+    
+    vbox.append(&words_scrolled);
+    
+    // Add word row
+    let add_word_box = gtk4::Box::new(Orientation::Horizontal, 8);
+    
+    let new_word_entry = Entry::new();
+    new_word_entry.set_hexpand(true);
+    new_word_entry.set_placeholder_text(Some("Enter a word..."));
+    add_word_box.append(&new_word_entry);
+    
+    let add_word_btn = Button::with_label("+ Add");
+    add_word_btn.add_css_class("suggested-action");
+    
+    let words_list_for_add = words_list.clone();
+    let custom_words_for_add = Rc::clone(&custom_words);
+    let new_word_entry_clone = new_word_entry.clone();
+    add_word_btn.connect_clicked(move |_| {
+        let word = new_word_entry_clone.text().trim().to_string();
+        if !word.is_empty() && !custom_words_for_add.borrow().contains(&word) {
+            create_word_row(&word, &words_list_for_add, &custom_words_for_add);
+            custom_words_for_add.borrow_mut().push(word);
+            new_word_entry_clone.set_text("");
+        }
+    });
+    add_word_box.append(&add_word_btn);
+    
+    // Also add on Enter key
+    let words_list_for_enter = words_list.clone();
+    let custom_words_for_enter = Rc::clone(&custom_words);
+    new_word_entry.connect_activate(move |entry| {
+        let word = entry.text().trim().to_string();
+        if !word.is_empty() && !custom_words_for_enter.borrow().contains(&word) {
+            create_word_row(&word, &words_list_for_enter, &custom_words_for_enter);
+            custom_words_for_enter.borrow_mut().push(word);
+            entry.set_text("");
+        }
+    });
+    
+    vbox.append(&add_word_box);
+
     // === LLM Section ===
     let llm_label = Label::new(Some("LLM ENHANCEMENT"));
     llm_label.set_halign(gtk4::Align::Start);
@@ -627,6 +741,9 @@ fn show_settings_dialog(parent: &ApplicationWindow, state: &Rc<RefCell<RecorderS
             if let Some(model) = model_combo.active_id() {
                 state.config.whisper.model = model.to_string();
             }
+
+            // Save custom words (vocabulary hints)
+            state.config.whisper.custom_words = custom_words.borrow().clone();
 
             // Save LLM settings
             if let Some(provider_id) = provider_combo.active_id() {

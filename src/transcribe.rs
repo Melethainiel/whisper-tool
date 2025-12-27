@@ -128,6 +128,13 @@ impl WhisperEngine {
             params.set_language(Some(lang));
         }
         
+        // Set initial prompt from custom words for vocabulary hints
+        if !config.whisper.custom_words.is_empty() {
+            let prompt = config.whisper.custom_words.join(", ");
+            params.set_initial_prompt(&prompt);
+            debug!("Using custom words for vocabulary hints: {}", prompt);
+        }
+        
         debug!(
             "Transcribing {} samples at {}Hz (cached model: {})",
             audio.samples.len(),
@@ -213,6 +220,13 @@ pub fn transcribe(audio: &AudioData, config: &Config) -> Result<String> {
     // Set language if specified
     if let Some(ref lang) = config.whisper.language {
         params.set_language(Some(lang));
+    }
+
+    // Set initial prompt from custom words for vocabulary hints
+    if !config.whisper.custom_words.is_empty() {
+        let prompt = config.whisper.custom_words.join(", ");
+        params.set_initial_prompt(&prompt);
+        debug!("Using custom words for vocabulary hints: {}", prompt);
     }
 
     debug!(
